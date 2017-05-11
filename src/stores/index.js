@@ -78,7 +78,6 @@ const ShebangEnchiladaStore = Reflux.createStore({
     results = results.concat( [
       dataService.isMongos() ? "mongos" : "not mongos"
     ] );
-    debug( "royisstupid a1", results);
     // before running the command, set status to "fetching"
     this.setState({ 
       status: 'fetching',
@@ -118,6 +117,39 @@ const ShebangEnchiladaStore = Reflux.createStore({
       serverList = serverList.concat( servers );
     }
     this.setState( { servers: serverList } );
+    this.state.dataService.find(
+      'config.chunks',
+      {},
+      {},
+      this.handleChunks.bind(this)
+    );
+  },  
+
+  handleChunks(err, docs) {
+    debug( "handleChunks", err, docs );
+    if (err) {
+      // handle error state
+      this.setState({ 
+        status: 'error' 
+      });
+      return;
+    }
+    var results = [];
+    results = results.concat(this.state.results);
+    results.push( "-- chunks --" );
+    for ( var i = 0; i < docs.length; i++ ) {
+      var chunk = docs[i];
+      // { "_id" : { "$minKey" : 1 } } -->> { "_id" : NumberLong("-4611686018427387902") } on : shard01 Timestamp(2, 2)
+      debug( "handleChunks chunk", chunk.min._id, chunk.max._id);
+      results.push( ( ( chunk.min._id._bsontype && chunk.min._id._bsontype === 'MinKey' ) ? '$minKey' : chunk.min._id ) + 
+        " -->> " + ( ( chunk.min._id._bsontype && chunk.max._id._bsontype === 'MaxKey' ) ? '$maxKey' : chunk.max._id ) + 
+        " on : " + chunk.shard + " " +
+        chunk.lastmod + " " +
+        (chunk.jumbo ? "jumbo " : ""));
+    }
+    this.setState({ 
+      results: results 
+    });
     this.state.dataService.command(
       'admin',
       {getCmdLineOpts: 1},
