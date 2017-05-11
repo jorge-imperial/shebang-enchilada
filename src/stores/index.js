@@ -54,7 +54,9 @@ const ShebangEnchiladaStore = Reflux.createStore({
       status: 'initial',
       name: '',
       authenticated: false,
-      results: []
+      results: [],
+      servers: [],
+      dataService: null
     };
   },
 
@@ -89,15 +91,42 @@ const ShebangEnchiladaStore = Reflux.createStore({
       {connectionStatus: 1, showPrivileges: true},
       this.handleConnectionStatus.bind(this)
       );*/
-    dataService.command(
+    this.setState( { dataService: dataService } );
+    dataService.find( "config.shards", {}, {}, this.handleShards.bind(this) );
+  },
+
+  handleShards(err, docs) {
+    debug( "handleShards", err, docs );
+    if (err) {
+      // handle error state
+      this.setState({ 
+        status: 'error' 
+      });
+      return;
+    }
+    var serverList = [];
+    for ( var i = 0; i < docs.length; i++ ) {
+      var split = docs[i].host.split("/");
+      var serversStr = "";
+      if ( split.length === 1 ) {
+        serversStr = split[0];
+      }
+      else {
+        serversStr = split[1];
+      }
+      var servers = serversStr.split(",");
+      serverList = serverList.concat( servers );
+    }
+    this.setState( { servers: serverList } );
+    this.state.dataService.command(
       'admin',
       {getCmdLineOpts: 1},
-      this.handleConnectionStatus.bind(this)
+      this.handleGetCmdLineOpts.bind(this)
     );
   },
 
-  handleConnectionStatus(err, res) {
-    debug( "royisstupid b", err, res );
+  handleGetCmdLineOpts(err, res) {
+    debug( "handleGetCmdLineOpts", err, res );
     if (err) {
       // handle error state
       this.setState({ 
@@ -117,18 +146,17 @@ const ShebangEnchiladaStore = Reflux.createStore({
       }
     }
     results = results.concat(this.state.results);
-    if ( logpath !== "" ) results = results.concat( [logpath] );
-    if ( configdb !== "" ) results = results.concat( [configdb] );
-    debug( "royisstupid d", results );
-    // get the user name of the first authenticated user
-    this.setState({
-      status: 'complete',
-      results: results
-    });
+    if ( logpath !== "" ) {
+      results.push( "-- logpath --" );
+      results.push( logpath );
+    }
+    if ( configdb !== "" ) {
+      results.push( "-- config servers --" );
+      results.push( configdb );
+    }
 
     if ( configdb !== "" ) {
       var split = configdb.split("/");
-      debug( "royisstupid y", split);
       var serversStr = "";
       if ( split.length === 1 ) {
         serversStr = split[0];
@@ -137,24 +165,84 @@ const ShebangEnchiladaStore = Reflux.createStore({
         serversStr = split[1];
       }
       var servers = serversStr.split(",");
-      debug( "royisstupid m", servers);
       var server = servers[0].split(":");
-      debug( "royisstupid z", server[0], server[1]);
+      this.setState({
+        status: 'complete',
+        results: results
+      });
       var c = new Connection({
         hostname: server[0],
         port: server[1]
       });
       var dataService = new DataService(c);
+      this.setState( { dataService: dataService } );
       dataService.connect(function() {
-        debug( "royisstupid n connected");
+        debug( "dataService connected");
         dataService.command(
           'admin',
           {getCmdLineOpts: 1},
-          this.handleConnectionStatus.bind(this)
+          this.handleGetCmdLineOpts.bind(this)
         );
       }.bind(this));
       
     }
+    else if ( this.state.dataService != null ) {
+      this.setState({
+        status: 'complete',
+        results: results
+      });
+      this.state.dataService.command(
+        'admin',
+        {replSetGetStatus: 1},
+        this.handleReplSetGetStatus.bind(this)
+      );
+    }
+    
+  },
+
+  handleReplSetGetStatus(err, res) {
+    debug( "handleReplSetGetStatus", err, res );
+    if (err) {
+      // handle error state
+      this.setState({ 
+        status: 'error' 
+      });
+      return;
+    }
+    var results = [];
+    results = results.concat(this.state.results);
+    results.push( "-- rs.status() --" );
+    for ( var i = 0; i < res.members.length; i++ ) {
+      results.push( res.members[i].name + ", " + res.members[i].stateStr );
+    }
+
+    if ( this.state.servers !== null && this.state.servers.length > 0 ) {
+      var serverList = [];
+      serverList = serverList.concat(this.state.servers);
+      var serverStr = serverList.shift();
+      var server = serverStr.split(":");
+      debug( "Connecting to", server[0], server[1]);
+      var c = new Connection({
+        hostname: server[0],
+        port: server[1]
+      });
+      var dataService = new DataService(c);
+      this.setState( { dataService: dataService, servers: serverList } );
+      dataService.connect(function() {
+        debug( "dataService connected");
+        dataService.command(
+          'admin',
+          {getCmdLineOpts: 1},
+          this.handleGetCmdLineOpts.bind(this)
+        );
+      }.bind(this));
+    }
+
+    // get the user name of the first authenticated user
+    this.setState({
+      status: 'complete',
+      results: results
+    });
     
   },
 
